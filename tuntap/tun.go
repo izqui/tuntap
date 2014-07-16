@@ -56,6 +56,13 @@ func (h IPHeader) Version() int {
 	return int(i)
 }
 
+func (h IPHeader) PayloadLength() int {
+
+	var i uint16
+	binary.BigEndian.PutUint16(h.Data[7:9], i)
+	return int(i)
+}
+
 type Interface struct {
 	name string
 	//file net.Conn
@@ -99,6 +106,11 @@ func (t *Interface) ReadPacket() (*IPPacket, error) {
 	}
 
 	pkt = &IPPacket{Header: IPHeader{Data: buf[start : start+ipHeaderLength]}, Payload: buf[start+ipHeaderLength : n]}
+
+	if pkt.Header.PayloadLength() != len(pkt.Payload) {
+
+		return nil, errors.New("Payload length not matching")
+	}
 
 	/*pkt.Protocol = int(binary.BigEndian.Uint16(buf[2:4]))
 	flags := int(*(*uint16)(unsafe.Pointer(&buf[0])))
