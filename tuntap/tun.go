@@ -31,7 +31,6 @@ const (
 
 const (
 	ipHeaderLength = 40
-	ipHeaderMeta   = 4
 )
 
 type IPPacket struct {
@@ -50,7 +49,7 @@ type IPHeader struct {
 	Data []byte
 }
 
-func (h IPHeader) Version() int {
+func (h IPHeader) version() int {
 
 	i := h.Data[0] >> 4
 
@@ -65,12 +64,12 @@ func (h IPHeader) PayloadLength() int {
 
 func (h IPHeader) SourceAddr() []byte {
 
-	return h.Data[8:23]
+	return h.Data[8:24]
 }
 
 func (h IPHeader) DestAddr() []byte {
 
-	return h.Data[24:39]
+	return h.Data[24:40]
 }
 
 func (h IPHeader) SetSourceAddr(a []byte) error {
@@ -132,9 +131,6 @@ func (t *Interface) ReadPacket() (*IPPacket, error) {
 	var pkt *IPPacket
 
 	start := 0
-	if t.meta {
-		start = ipHeaderMeta
-	}
 
 	if n < start+ipHeaderLength {
 
@@ -148,6 +144,8 @@ func (t *Interface) ReadPacket() (*IPPacket, error) {
 		return nil, errors.New("Payload length not matching")
 	}
 
+	pkt.Protocol = pkt.Header.version()
+
 	/*pkt.Protocol = int(binary.BigEndian.Uint16(buf[2:4]))
 	flags := int(*(*uint16)(unsafe.Pointer(&buf[0])))
 	if flags&flagTruncated != 0 {
@@ -158,23 +156,17 @@ func (t *Interface) ReadPacket() (*IPPacket, error) {
 }
 
 // Send a single packet to the kernel.
-func (t *Interface) WritePacket(pkt *IPPacket) error {
-	// If only we had writev(), I could do zero-copy here...
-	buf := make([]byte, len(pkt.Payload)+4)
-	binary.BigEndian.PutUint16(buf[2:4], uint16(pkt.Protocol))
-	copy(buf[4:], pkt.Payload)
+func (t *Interface) WritePacket(packet *IPPacket) error {
 
-	var n int
-	var err error
-	if t.meta {
-		n, err = t.file.Write(buf)
-	} else {
-		n, err = t.file.Write(pkt.Payload)
-	}
+	// If only we had writev(), I could do zero-copy here...
+
+	n, err := t.file.Write(append(packet.Header.Data, packet.Payload...))
+
 	if err != nil {
 		return err
 	}
-	if n != len(buf) {
+
+	if n != ipHeaderLength+packet.Header.PayloadLength() {
 		return io.ErrShortWrite
 	}
 	return nil
