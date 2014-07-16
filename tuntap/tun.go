@@ -9,9 +9,10 @@ package tuntap
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
-	"unsafe"
+	_ "unsafe"
 )
 
 type DevKind int
@@ -27,7 +28,12 @@ const (
 	DevTap
 )
 
-type Packet struct {
+const (
+	ipHeaderLength = 40
+	ipHeaderMeta   = 4
+)
+
+type IPPacket struct {
 	// The Ethernet type of the packet. Commonly seen values are
 	// 0x8000 for IPv4 and 0x86dd for IPv6.
 	Protocol int
@@ -35,7 +41,19 @@ type Packet struct {
 	Truncated bool
 	// The raw bytes of the Ethernet payload (for DevTun) or the full
 	// Ethernet frame (for DevTap).
-	Packet []byte
+	Header  IPHeader
+	Payload []byte
+}
+
+type IPHeader struct {
+	Data []byte
+}
+
+func (h IPHeader) Version() int {
+
+	i := h.Data[0] >> 4
+
+	return int(i)
 }
 
 type Interface struct {
@@ -60,7 +78,7 @@ func (t *Interface) Name() string {
 }
 
 // Read a single packet from the kernel.
-func (t *Interface) ReadPacket() (*Packet, error) {
+func (t *Interface) ReadPacket() (*IPPacket, error) {
 	buf := make([]byte, 10000)
 
 	n, err := t.file.Read(buf)
@@ -68,33 +86,42 @@ func (t *Interface) ReadPacket() (*Packet, error) {
 		return nil, err
 	}
 
-	var pkt *Packet
+	var pkt *IPPacket
+
+	start := 0
 	if t.meta {
-		pkt = &Packet{Packet: buf[4:n]}
-	} else {
-		pkt = &Packet{Packet: buf[0:n]}
+		start = ipHeaderMeta
 	}
-	pkt.Protocol = int(binary.BigEndian.Uint16(buf[2:4]))
+
+	if n < start+ipHeaderLength {
+
+		return nil, errors.New("Not a IPv6 packet")
+	}
+
+	pkt = &IPPacket{Header: IPHeader{Data: buf[start : start+ipHeaderLength]}, Payload: buf[start+ipHeaderLength : n]}
+
+	/*pkt.Protocol = int(binary.BigEndian.Uint16(buf[2:4]))
 	flags := int(*(*uint16)(unsafe.Pointer(&buf[0])))
 	if flags&flagTruncated != 0 {
 		pkt.Truncated = true
-	}
+	}*/
+
 	return pkt, nil
 }
 
 // Send a single packet to the kernel.
-func (t *Interface) WritePacket(pkt *Packet) error {
+func (t *Interface) WritePacket(pkt *IPPacket) error {
 	// If only we had writev(), I could do zero-copy here...
-	buf := make([]byte, len(pkt.Packet)+4)
+	buf := make([]byte, len(pkt.Payload)+4)
 	binary.BigEndian.PutUint16(buf[2:4], uint16(pkt.Protocol))
-	copy(buf[4:], pkt.Packet)
+	copy(buf[4:], pkt.Payload)
 
 	var n int
 	var err error
 	if t.meta {
 		n, err = t.file.Write(buf)
 	} else {
-		n, err = t.file.Write(pkt.Packet)
+		n, err = t.file.Write(pkt.Payload)
 	}
 	if err != nil {
 		return err
