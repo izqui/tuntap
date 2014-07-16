@@ -10,6 +10,7 @@ package tuntap
 import (
 	"encoding/binary"
 	"errors"
+	_ "fmt"
 	"io"
 	"os"
 	_ "unsafe"
@@ -58,9 +59,44 @@ func (h IPHeader) Version() int {
 
 func (h IPHeader) PayloadLength() int {
 
-	var i uint16
-	binary.BigEndian.PutUint16(h.Data[7:9], i)
+	i := binary.BigEndian.Uint16(h.Data[4:6])
 	return int(i)
+}
+
+func (h IPHeader) SourceAddr() []byte {
+
+	return h.Data[8:23]
+}
+
+func (h IPHeader) DestAddr() []byte {
+
+	return h.Data[24:39]
+}
+
+func (h IPHeader) SetSourceAddr(a []byte) error {
+
+	if len(a) == 16 {
+
+		b := h.Data[24:]
+		h.Data = append(h.Data[:8], a...)
+		h.Data = append(h.Data, b...)
+
+		return nil
+	}
+
+	return errors.New("IPv6 headers are required")
+}
+
+func (h IPHeader) SetDestAddr(a []byte) error {
+
+	if len(a) == 16 {
+
+		h.Data = append(h.Data[:24], a...)
+
+		return nil
+	}
+
+	return errors.New("IPv6 headers are required")
 }
 
 type Interface struct {
